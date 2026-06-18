@@ -20,13 +20,18 @@ var upgrader = websocket.Upgrader{
 }
 
 type AGVState struct {
-	ID       int   `json:"id"`
-	X        int   `json:"x"`
-	Y        int   `json:"y"`
-	Status   int   `json:"status"`
-	HasCargo bool  `json:"hasCargo"`
-	Battery  int   `json:"battery"`
-	TaskID   int   `json:"taskId"`
+	ID          int     `json:"id"`
+	X           int     `json:"x"`
+	Y           int     `json:"y"`
+	Status      int     `json:"status"`
+	HasCargo    bool    `json:"hasCargo"`
+	Battery     int     `json:"battery"`
+	TaskID      int     `json:"taskId"`
+	Temperature float64 `json:"temperature"`
+	Voltage     float64 `json:"voltage"`
+	IsCharging  bool    `json:"isCharging"`
+	IsReturning bool    `json:"isReturning"`
+	LowBattery  bool    `json:"lowBattery"`
 }
 
 type MapCell struct {
@@ -127,14 +132,24 @@ func (s *Server) collectAGVStates() []AGVState {
 	states := []AGVState{}
 	for _, a := range s.AGVManager.GetAll() {
 		x, y, hasCargo := a.GetPosition()
+		bat := a.GetBattery()
+		st := a.GetStatus()
+		isCharging := st == agv.StatusCharging || a.IsCharging()
+		isReturning := a.IsReturning()
+		lowBat := bat.SOC < 30 || st == agv.StatusLowBattery
 		states = append(states, AGVState{
-			ID:       a.ID,
-			X:        x,
-			Y:        y,
-			Status:   a.GetStatus(),
-			HasCargo: hasCargo,
-			Battery:  a.Battery,
-			TaskID:   a.CurrentTask,
+			ID:          a.ID,
+			X:           x,
+			Y:           y,
+			Status:      st,
+			HasCargo:    hasCargo,
+			Battery:     bat.SOC,
+			TaskID:      a.CurrentTask,
+			Temperature: bat.Temperature,
+			Voltage:     bat.Voltage,
+			IsCharging:  isCharging,
+			IsReturning: isReturning,
+			LowBattery:  lowBat,
 		})
 	}
 	return states

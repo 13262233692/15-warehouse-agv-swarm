@@ -9,13 +9,29 @@ export default function App() {
     let moving = 0
     let idle = 0
     let withCargo = 0
+    let charging = 0
+    let lowBattery = 0
+    let returning = 0
+    let avgSOC = 0
+    let avgTemp = 0
     const list = Object.values(agvs)
     list.forEach(a => {
       if (a.status === 1) moving++
       else if (a.status === 0 || a.status === undefined) idle++
+      if (a.status === 4 || a.isCharging) charging++
       if (a.hasCargo) withCargo++
+      if (a.lowBattery || a.lowbat || (a.battery != null && a.battery < 30)) lowBattery++
+      if (a.isReturning) returning++
+      if (a.battery != null) avgSOC += a.battery
+      if (a.temperature != null) avgTemp += a.temperature
     })
-    return { moving, idle, withCargo, total: list.length }
+    const n = list.length || 1
+    return {
+      moving, idle, withCargo, total: list.length,
+      charging, lowBattery, returning,
+      avgSOC: Math.round(avgSOC / n),
+      avgTemp: (avgTemp / n).toFixed(1)
+    }
   }, [agvs])
 
   const orderStats = useMemo(() => {
@@ -30,15 +46,30 @@ export default function App() {
     return { pending, progress, done, total: Object.keys(orders).length }
   }, [orders])
 
-  const statusLabel = (s) => {
-    switch (s) {
+  const statusLabel = (a) => {
+    if (a.isCharging) return <span className="agv-status status-charging">充电中</span>
+    if (a.isReturning) return <span className="agv-status status-returning">回充中</span>
+    if (a.status === 8 || a.lowBattery || a.lowbat) return <span className="agv-status status-lowbat">低电量</span>
+    switch (a.status) {
       case 0: return <span className="agv-status status-idle">空闲</span>
       case 1: return <span className="agv-status status-moving">移动</span>
       case 2: return <span className="agv-status status-picking">取货</span>
       case 3: return <span className="agv-status status-placing">放货</span>
       case 4: return <span className="agv-status status-charging">充电</span>
+      case 5: return <span className="agv-status status-waiting">等待</span>
+      case 6: return <span className="agv-status status-error">错误</span>
+      case 7: return <span className="agv-status status-returning">返回中</span>
       default: return <span className="agv-status status-idle">空闲</span>
     }
+  }
+
+  const batteryColor = (soc) => {
+    if (soc == null) return '#94a3b8'
+    if (soc < 10) return '#dc2626'
+    if (soc < 20) return '#f97316'
+    if (soc < 40) return '#eab308'
+    if (soc < 60) return '#fbbf24'
+    return '#22c55e'
   }
 
   const orderStatusLabel = (s) => {
@@ -73,8 +104,24 @@ export default function App() {
             <span className="stat-value idle">{stats.idle}</span>
           </div>
           <div className="stat-item">
-            <span className="stat-label">载货</span>
-            <span className="stat-value cargo">{stats.withCargo}</span>
+            <span className="stat-label">充电</span>
+            <span className="stat-value charging">{stats.charging}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">低电量</span>
+            <span className="stat-value lowbat">{stats.lowBattery}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">回充</span>
+            <span className="stat-value returning">{stats.returning}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">平均SOC</span>
+            <span className="stat-value" style={{ color: batteryColor(stats.avgSOC) }}>{stats.avgSOC}%</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">平均温度</span>
+            <span className="stat-value">{stats.avgTemp}°C</span>
           </div>
           <div className="stat-item">
             <span className="stat-label">订单</span>
@@ -119,17 +166,43 @@ export default function App() {
                 <div className="legend-color" style={{ background: '#34d399' }} />
                 <span>AGV 移动中</span>
               </div>
+              <div className="legend-item">
+                <div className="legend-color" style={{ background: '#22c55e', boxShadow: '0 0 8px #22c55e' }} />
+                <span>AGV 充电中</span>
+              </div>
+              <div className="legend-item">
+                <div className="legend-color" style={{ background: '#facc15', boxShadow: '0 0 8px #facc15' }} />
+                <span>AGV 低电量/回充</span>
+              </div>
             </div>
           </div>
 
           <div className="sidebar-section">
             <div className="sidebar-title">AGV 列表</div>
-            <div className="agv-list">
+            <div className="agv-list agv-list-energy">
               {Object.values(agvs).sort((a, b) => a.id - b.id).map(a => (
-                <div key={a.id} className="agv-item">
-                  <span className="agv-id">#{String(a.id).padStart(3, '0')}</span>
-                  {statusLabel(a.status)}
-                  <span className="agv-pos">({a.x},{a.y})</span>
+                <div key={a.id} className={`agv-item ${a.isCharging ? 'agv-charging-row' : ''} ${a.isReturning || a.lowBattery ? 'agv-lowbat-row' : ''}`}>
+                  <div className="agv-row-main">
+                    <span className="agv-id">#{String(a.id).padStart(3, '0')}</span>
+                    {statusLabel(a)}
+                    <span className="agv-pos">({a.x},{a.y})</span>
+                    {a.hasCargo && <span className="agv-cargo-tag">📦</span>}
+                  </div>
+                  <div className="agv-energy-row">
+                    <div className="agv-battery-bar">
+                      <div
+                        className="agv-battery-fill"
+                        style={{
+                          width: `${Math.max(0, Math.min(100, a.battery ?? 0))}%`,
+                          background: batteryColor(a.battery)
+                        }}
+                      />
+                      <span className="agv-battery-text">{a.battery ?? '--'}%</span>
+                    </div>
+                    <span className="agv-temp" style={{ color: (a.temperature ?? 0) > 45 ? '#ef4444' : (a.temperature ?? 0) > 35 ? '#f59e0b' : '#94a3b8' }}>
+                      🌡 {a.temperature != null ? a.temperature.toFixed(1) : '--'}°C
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>

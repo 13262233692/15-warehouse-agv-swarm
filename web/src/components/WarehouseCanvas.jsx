@@ -18,8 +18,11 @@ const COLOR_AGV_MOVING = '#34d399'
 const COLOR_AGV_PICK = '#60a5fa'
 const COLOR_AGV_PLACE = '#a78bfa'
 const COLOR_CARGO = '#ef4444'
+const COLOR_LOW_BATTERY = '#facc15'
+const COLOR_CHARGING_STATE = '#22c55e'
+const COLOR_RETURNING = '#eab308'
 
-function getAGVColor(status) {
+function getAGVBaseColor(status) {
   switch (status) {
     case 1: return COLOR_AGV_MOVING
     case 2: return COLOR_AGV_PICK
@@ -27,6 +30,14 @@ function getAGVColor(status) {
     case 4: return COLOR_AGV_PLACE
     default: return COLOR_AGV_IDLE
   }
+}
+
+function getBatteryColor(soc) {
+  if (soc < 10) return '#dc2626'
+  if (soc < 20) return '#f97316'
+  if (soc < 40) return '#eab308'
+  if (soc < 60) return '#fbbf24'
+  return '#22c55e'
 }
 
 export default function WarehouseCanvas({ map, agvs, agvPositionsRef
@@ -128,10 +139,59 @@ export default function WarehouseCanvas({ map, agvs, agvPositionsRef
         const py = oy + (y + 0.5) * cellSize
         const r = cellSize * 0.45
 
-        const agvColor = getAGVColor(a.status)
+        const isCharging = a.isCharging
+        const isReturning = a.isReturning
+        const lowBattery = a.lowBattery || a.lowbat
+
+        let agvColor = getAGVBaseColor(a.status)
+        let glow = 6
+        let blinkAlpha = 1
+        let ringEnabled = false
+        let ringColor = null
+
+        if (isCharging) {
+          agvColor = COLOR_CHARGING_STATE
+          glow = 18
+          ringEnabled = true
+          ringColor = '#22c55e'
+          const breath = 0.5 + 0.5 * Math.sin(now / 600)
+          glow = 10 + breath * 18
+        } else if (isReturning || lowBattery) {
+          agvColor = COLOR_LOW_BATTERY
+          glow = 14
+          const blinkPhase = (Math.sin(now / 150) + 1) / 2
+          blinkAlpha = 0.55 + blinkPhase * 0.45
+          ringEnabled = true
+          ringColor = '#eab308'
+          glow = 8 + blinkPhase * 20
+        }
+
+        if (ringEnabled && ringColor) {
+          ctx.save()
+          const ringR = r + cellSize * 0.35
+          const ringAlpha = 0.25 + Math.abs(Math.sin(now / 200)) * 0.45
+          ctx.strokeStyle = ringColor
+          ctx.globalAlpha = ringAlpha
+          ctx.lineWidth = cellSize * 0.18
+          ctx.beginPath()
+          ctx.arc(px, py, ringR, 0, Math.PI * 2)
+          ctx.stroke()
+
+          if (isCharging) {
+            ctx.strokeStyle = '#4ade80'
+            ctx.globalAlpha = 0.15 + Math.abs(Math.sin(now / 350)) * 0.3
+            ctx.lineWidth = cellSize * 0.1
+            ctx.beginPath()
+            ctx.arc(px, py, ringR + cellSize * 0.3, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+          ctx.restore()
+        }
+
         ctx.save()
         ctx.shadowColor = agvColor
-        ctx.shadowBlur = 6
+        ctx.shadowBlur = glow
+        ctx.globalAlpha = blinkAlpha
         ctx.fillStyle = agvColor
         ctx.beginPath()
         ctx.arc(px, py, r, 0, Math.PI * 2)
@@ -141,6 +201,40 @@ export default function WarehouseCanvas({ map, agvs, agvPositionsRef
         if (a.hasCargo) {
           ctx.fillStyle = COLOR_CARGO
           ctx.fillRect(px - r * 0.5, py - r * 0.5, r, r)
+        }
+
+        if (isCharging) {
+          ctx.fillStyle = '#86efac'
+          ctx.font = `bold ${Math.max(9, cellSize * 0.7)}px sans-serif`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText('⚡', px, py - cellSize * 0.65)
+        } else if (isReturning || lowBattery) {
+          ctx.fillStyle = '#fde047'
+          ctx.font = `bold ${Math.max(8, cellSize * 0.6)}px sans-serif`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText('🔋', px, py - cellSize * 0.65)
+        }
+
+        if (a.battery != null) {
+          const batW = cellSize * 1.4
+          const batH = cellSize * 0.35
+          const batX = px - batW / 2
+          const batY = py + r + cellSize * 0.25
+          ctx.fillStyle = '#1e293b'
+          ctx.fillRect(batX, batY, batW, batH)
+          ctx.strokeStyle = '#475569'
+          ctx.lineWidth = 0.8
+          ctx.strokeRect(batX, batY, batW, batH)
+          const fillW = (batW - 2) * Math.max(0, Math.min(1, a.battery / 100))
+          ctx.fillStyle = getBatteryColor(a.battery)
+          ctx.fillRect(batX + 1, batY + 1, fillW, batH - 2)
+          ctx.fillStyle = '#f1f5f9'
+          ctx.font = `${Math.max(7, cellSize * 0.38)}px monospace`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(`${a.battery}%`, px, batY + batH / 2)
         }
 
         ctx.fillStyle = '#0a0e1a'
